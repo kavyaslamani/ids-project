@@ -1,5 +1,7 @@
 fastapi
-uvicorn
-numpy
-pandas
-scikit-learn
+ uvicorn
+  numpy
+   tensorflow
+    scikit-learn
+     joblib
+      h5py
