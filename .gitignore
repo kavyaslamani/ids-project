@@ -1,7 +1,9 @@
 __pycache__/
+*.pyc
 *.h5
 *.pkl
 *.zip
 attack_logs.csv
+ids.db
 data/
 models/

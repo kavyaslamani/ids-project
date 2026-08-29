@@ -71,32 +71,38 @@ def extract(packet):
 # Send Features to FastAPI
 # -----------------------------
 
-def send(features):
+def send(features, packet):
 
     try:
 
+        payload = {
+            "features": features,
+
+            "src_ip": packet[IP].src,
+            "dst_ip": packet[IP].dst,
+            "protocol": packet[IP].proto
+        }
+
         response = requests.post(
-
             API_URL,
-
-            json={"features": features}
-
+            json=payload
         )
 
         result = response.json()
 
-        print("\n======================")
-        print("🚨 LIVE IDS DETECTION")
-        print("======================")
-
-        print("Prediction:", result["prediction"])
-        print("Anomaly Score:", result["anomaly_score"])
-        print("Risk Level:", result["risk_level"])
+        print("\n==========================")
+        print("LIVE IDS DETECTION")
+        print("==========================")
+        print("Source IP :", payload["src_ip"])
+        print("Destination IP :", payload["dst_ip"])
+        print("Prediction :", result["attack"])
+        print("Risk :", result["risk"])
+        print("Confidence :", result["confidence"])
+        print("Reconstruction Error :", result["reconstruction_error"])
 
     except Exception as e:
 
         print("API ERROR:", e)
-
 # -----------------------------
 # Process Packets
 # -----------------------------
@@ -106,7 +112,7 @@ def process(packet):
     features = extract(packet)
 
     if features:
-        send(features)
+        send(features, packet)
 
 # -----------------------------
 # Start IDS

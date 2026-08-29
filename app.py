@@ -1,148 +1,283 @@
-
 from fastapi import FastAPI
 import numpy as np
+import pandas as pd
 import tensorflow as tf
 import joblib
+from datetime import datetime
+
+from database import create_database, insert_attack
 
 app = FastAPI()
 
-# ---------------------------------
+# ==========================================
+# CREATE DATABASE
+# ==========================================
+
+create_database()
+
+# ==========================================
 # LOAD AI MODELS
-# ---------------------------------
+# ==========================================
 
 autoencoder = tf.keras.models.load_model(
-    "autoencoder.h5",
+    "models/autoencoder_combined.h5",
     compile=False
 )
 
 dnn_model = tf.keras.models.load_model(
-    "dnn_model.h5",
+    "models/dnn_combined.h5",
     compile=False
 )
 
 scaler = joblib.load(
-    "scaler.pkl"
+    "models/scaler_combined.pkl"
 )
 
 label_encoder = joblib.load(
-    "label_encoder.pkl"
+    "models/label_encoder_combined.pkl"
 )
 
-# ---------------------------------
-# HOME ROUTE
-# ---------------------------------
+threshold = joblib.load(
+    "models/autoencoder_threshold_combined.pkl"
+)
 
-@app.get("/")
-def home():
-
-    return {
-        "message": "Adaptive Hybrid IDS AI Server Running"
-    }
-
-# ---------------------------------
-# PREDICT ROUTE
-# ---------------------------------
+# ==========================================
+# PREDICTION ROUTE
+# ==========================================
 
 @app.post("/predict")
 def predict(data: dict):
 
+    src_ip = data.get("src_ip", "Unknown")
+    dst_ip = data.get("dst_ip", "Unknown")
+    protocol = data.get("protocol", 0)
+
     try:
 
-        # -----------------------------
+        # ==================================
         # FEATURE PROCESSING
-        # -----------------------------
+        # ==================================
 
-        features = np.array(
-            data["features"]
-        ).reshape(1, -1)
+        features = np.asarray(
+            data["features"],
+            dtype=float
+        )
 
-        scaled = scaler.transform(features)
+        if features.size != 78:
 
-        # -----------------------------
+            return {
+                "attack": "System Error",
+                "detection_type": "System Error",
+                "anomaly": False,
+                "reconstruction_error": 0,
+                "risk": "Unknown",
+                "confidence": 0,
+                "error": (
+                    f"Expected 78 features but received "
+                    f"{features.size}"
+                )
+            }
+
+        features = features.reshape(1, 78)
+
+                # ==================================
+        # SCALING
+        # ==================================
+
+        if hasattr(scaler, "feature_names_in_"):
+
+            features_for_scaler = pd.DataFrame(
+                features,
+                columns=scaler.feature_names_in_
+            )
+
+        else:
+
+            features_for_scaler = features
+
+        scaled = scaler.transform(
+            features_for_scaler
+        )
+
+        # ==================================
+        # DEBUG LIVE SCALING
+        # ==================================
+
+        feature_names = (
+            list(features_for_scaler.columns)
+            if hasattr(features_for_scaler, "columns")
+            else [str(i) for i in range(78)]
+        )
+
+        debug_df = pd.DataFrame({
+            "Feature": feature_names,
+            "Raw": features[0],
+            "Mean": scaler.mean_,
+            "Scale": scaler.scale_,
+            "Scaled": scaled[0],
+        })
+
+        debug_df["AbsScaled"] = np.abs(
+            debug_df["Scaled"]
+        )
+
+        print()
+        print("==========================================")
+        print("TOP 15 LIVE SCALED FEATURES")
+        print("==========================================")
+
+        print(
+            debug_df
+            .sort_values(
+                "AbsScaled",
+                ascending=False
+            )
+            .head(15)
+            .to_string(index=False)
+        )
+
+        # ==================================
         # AUTOENCODER
-        # -----------------------------
+        # ==================================
 
         reconstructed = autoencoder.predict(
             scaled,
             verbose=0
         )
+        
+                # ==================================
+        # DEBUG LIVE SCALING
+        # ==================================
 
-        mse = np.mean(
-            np.square(scaled - reconstructed)
+        
+        
+
+        reconstruction_error = float(
+            np.mean(
+                np.square(
+                    scaled - reconstructed
+                )
+            )
         )
 
-        # -----------------------------
-        # NORMALIZED SCORE
-        # -----------------------------
+        # ==================================
+        # ANOMALY DETECTION
+        # ==================================
 
-        anomaly_score = float(mse / 300)
+        threshold = 0.04958238299974599
 
-        # -----------------------------
-        # ATTACK DETECTION
-        # -----------------------------
+        anomaly = reconstruction_error > threshold
 
-        if anomaly_score > 4:
+        # ==================================
+        # DNN CLASSIFICATION
+        # ==================================
 
-            attack = "Unknown Attack"
+        prediction = dnn_model.predict(
+            scaled,
+            verbose=0
+        )
 
-            risk = "Critical"
+        confidence = float(
+            np.max(prediction)
+        )
 
-        elif anomaly_score > 2:
+        predicted_class = int(
+            np.argmax(prediction)
+        )
 
-            prediction = dnn_model.predict(
-                scaled,
-                verbose=0
-            )
-
-            predicted_class = np.argmax(
-                prediction
-            )
-
-            attack = label_encoder.inverse_transform(
+        predicted_attack = str(
+            label_encoder.inverse_transform(
                 [predicted_class]
             )[0]
+        )
 
-            risk = "High"
+        # ==================================
+        # HYBRID DECISION
+        # ==================================
 
-        elif anomaly_score > 0.8:
+        if not anomaly:
 
-            attack = "Suspicious Traffic"
+            attack = "Benign"
+            detection_type = "Benign Traffic"
 
-            risk = "Medium"
+        elif predicted_attack == "Benign":
+
+            attack = "Unknown Attack"
+            detection_type = "Unknown Anomaly"
+
+        elif confidence < 0.90:
+
+            attack = "Unknown Attack"
+            detection_type = "Unknown Anomaly"
 
         else:
 
-            attack = "Normal Traffic"
+            attack = predicted_attack
+            detection_type = "Known Attack"
+
+        # ==================================
+        # RISK LEVEL
+        # ==================================
+
+        if not anomaly:
 
             risk = "Low"
 
-        # -----------------------------
-        # RESPONSE
-        # -----------------------------
+        elif reconstruction_error >= threshold * 2:
+
+            risk = "High"
+
+        else:
+
+            risk = "Medium"
+
+        # ==================================
+        # SAVE TO SQLITE DATABASE
+        # ==================================
+
+        timestamp = datetime.now().strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+
+        insert_attack(
+            timestamp,
+            src_ip,
+            dst_ip,
+            protocol,
+            attack,
+            int(anomaly),
+            reconstruction_error,
+            risk,
+            confidence
+        )
+
+        # ==================================
+        # RETURN RESULT
+        # ==================================
 
         return {
-
-            "prediction": attack,
-
-            "anomaly_score": round(
-                anomaly_score,
+            "attack": attack,
+            "detection_type": detection_type,
+            "anomaly": bool(anomaly),
+            "reconstruction_error": round(
+                reconstruction_error,
                 6
             ),
-
-            "risk_level": risk
-
+            "risk": risk,
+            "confidence": round(
+                confidence,
+                4
+            )
         }
 
     except Exception as e:
 
         return {
-
-            "prediction": "System Error",
-
-            "anomaly_score": 0,
-
-            "risk_level": "Unknown",
-
+            "attack": "System Error",
+            "detection_type": "System Error",
+            "anomaly": False,
+            "reconstruction_error": 0,
+            "risk": "Unknown",
+            "confidence": 0,
             "error": str(e)
-
         }
