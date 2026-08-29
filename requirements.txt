@@ -1,7 +1,12 @@
 fastapi==0.115.0
 uvicorn==0.30.6
 numpy==1.26.4
+pandas
 tensorflow-cpu==2.15.0
 scikit-learn==1.5.2
 joblib==1.4.2
 h5py==3.11.0
+streamlit
+plotly
+scapy
+requests
