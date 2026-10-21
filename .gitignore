@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 *.pkl
+!models/scaler_combined.pkl
 *.zip
 
 # Logs
