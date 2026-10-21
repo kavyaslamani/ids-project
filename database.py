@@ -1,6 +1,6 @@
 import sqlite3
 
-DB_NAME = "ids.db"
+DB_NAME = "ids_recovered.db"
 
 def create_database():
 

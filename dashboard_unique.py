@@ -16,7 +16,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-DB_NAME = "ids.db"
+DB_NAME = "ids_recovered.db"
 
 # ============================================================
 # REAL SOC THEME
@@ -44,9 +44,11 @@ h1, h2, h3 {
     letter-spacing: .02em;
 }
 h1 {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 1.55rem !important;
+    font-family: 'Inter', sans-serif;
+    font-size: 1.8rem !important;
+    font-weight: 700;
     color: #f2f4f5;
+    letter-spacing: .02em;
 }
 h2, h3 {
     color: #cfd4d8;
@@ -140,8 +142,6 @@ except Exception as e:
 
 if df.empty:
     st.warning("No network flows captured yet. Start the live IDS pipeline.")
-    time.sleep(3)
-    st.rerun()
 
 # ============================================================
 # CLEAN
@@ -164,10 +164,11 @@ known_attacks = len(df[
     (df["anomaly"] == 1)
 ])
 total_attacks = known_attacks + unknown_attacks
-high_risk = len(df[df["risk"] == "High"])
-medium_risk = len(df[df["risk"] == "Medium"])
-low_risk = len(df[df["risk"] == "Low"])
-unknown_risk = len(df[df["risk"] == "Unknown"])
+risk_upper = df["risk"].astype(str).str.strip().str.upper()
+high_risk = int((risk_upper == "HIGH").sum())
+medium_risk = int((risk_upper == "MEDIUM").sum())
+low_risk = int((risk_upper == "LOW").sum())
+unknown_risk = int((risk_upper == "UNKNOWN").sum())
 system_errors = len(df[df["attack"] == "System Error"])
 anomaly_rate = (anomalies / total_flows * 100) if total_flows else 0
 
@@ -372,6 +373,87 @@ else:
         "No public IPs with geolocation available in the latest flows. "
         "Private addresses such as 192.168.x.x remain labeled LOCAL / PRIVATE."
     )
+
+# ============================================================
+# SECURITY RESPONSE // LIVE
+# ============================================================
+st.markdown('<div class="panel-title">SECURITY RESPONSE // LIVE</div>', unsafe_allow_html=True)
+sec_left, sec_right = st.columns([1.05, 1.05])
+risk_text = df["risk"].astype(str).str.strip().str.upper()
+high_critical = df[risk_text.isin(["HIGH", "CRITICAL"])].copy()
+
+with sec_left:
+    st.markdown('<div class="panel-title">🚨 REAL-TIME SECURITY ALERTS</div>', unsafe_allow_html=True)
+    if high_critical.empty:
+        st.info("No HIGH or CRITICAL risk records found in the loaded database.")
+    else:
+        latest_alert = high_critical.iloc[0]
+        alert_risk = str(latest_alert["risk"]).strip().upper()
+        alert_time = latest_alert["timestamp"] if pd.notna(latest_alert["timestamp"]) else "Unknown"
+        alert_html = (
+            '<div class="alert-high"><b>🚨 ACTIVE ' + alert_risk + '-RISK ALERT</b><br><br>'
+            + 'Attack: ' + str(latest_alert["attack"]) + '<br>'
+            + 'Risk: ' + str(latest_alert["risk"]) + '<br>'
+            + 'Source: ' + str(latest_alert["source_ip"]) + '<br>'
+            + 'Destination: ' + str(latest_alert["destination_ip"]) + '<br>'
+            + 'Reconstruction Error: ' + f'{latest_alert["reconstruction_error"]:.3f}' + '<br>'
+            + 'Confidence: ' + f'{latest_alert["confidence"]:.3f}' + '<br>'
+            + 'Time: ' + str(alert_time) + '</div>'
+        )
+        st.markdown(alert_html, unsafe_allow_html=True)
+
+with sec_right:
+    st.markdown('<div class="panel-title">🔥 FIREWALL RESPONSE</div>', unsafe_allow_html=True)
+    if high_critical.empty:
+        st.info("No high-risk record to evaluate.")
+    else:
+        latest_alert = high_critical.iloc[0]
+        src_ip = str(latest_alert["source_ip"]).strip()
+        try:
+            public_ip = ipaddress.ip_address(src_ip).is_global
+        except ValueError:
+            public_ip = False
+        if src_ip in ("", "Unknown", "None"):
+            fw_status, fw_reason = "SKIPPED", "INVALID SOURCE IP"
+        elif not public_ip:
+            fw_status, fw_reason = "SKIPPED", "NON-PUBLIC / LOCAL IP"
+        else:
+            fw_status = "DRY RUN — WOULD BLOCK"
+            fw_reason = "PUBLIC IP ELIGIBLE; actual blocking is disabled while DRY_RUN=True"
+        alert_time = latest_alert["timestamp"] if pd.notna(latest_alert["timestamp"]) else "Unknown"
+        fw_html = (
+            '<div class="panel"><b>🔥 FIREWALL RESPONSE</b><br><br>'
+            + 'Status: ' + fw_status + '<br>'
+            + 'Source IP: ' + src_ip + '<br>'
+            + 'Reason: ' + fw_reason + '<br>'
+            + 'Risk: ' + str(latest_alert["risk"]) + '<br>'
+            + 'Attack: ' + str(latest_alert["attack"]) + '<br>'
+            + 'Time: ' + str(alert_time) + '</div>'
+        )
+        st.markdown(fw_html, unsafe_allow_html=True)
+
+# Keep dashboard firewall counters focused on recent activity, not all history.
+recent_high_critical = high_critical.head(100).copy()
+
+def is_eligible_public_ip(value):
+    try:
+        return ipaddress.ip_address(str(value).strip()).is_global
+    except ValueError:
+        return False
+
+recent_sources = {
+    str(value).strip()
+    for value in recent_high_critical["source_ip"].dropna()
+    if str(value).strip() not in ("", "Unknown", "None")
+}
+eligible_recent_sources = {
+    ip for ip in recent_sources if is_eligible_public_ip(ip)
+}
+
+count1, count2 = st.columns(2)
+count1.metric("ACTIVE HIGH-RISK SOURCES (LATEST 100 ALERTS)", f"{len(recent_sources):,}")
+count2.metric("ELIGIBLE PUBLIC SOURCES (LATEST 100 ALERTS)", f"{len(eligible_recent_sources):,}")
+st.caption("Counters summarize the latest 100 HIGH/CRITICAL records; they do not mean these IPs were actually blocked.")
 
 # ============================================================
 # LIVE CONNECTION FEED

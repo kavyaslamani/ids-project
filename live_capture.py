@@ -654,6 +654,7 @@ def send_flow(key, flow):
             "Detection Type:",
             result.get("detection_type")
         )
+        print("API Error:", result.get("error", "None"))
 
         print(
             "Anomaly:",

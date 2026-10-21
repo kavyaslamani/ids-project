@@ -7,3 +7,11 @@ attack_logs.csv
 ids.db
 data/
 models/
+
+# Local databases and backups
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
