@@ -3,6 +3,7 @@ __pycache__/
 *.pkl
 !models/scaler_combined.pkl
 !models/label_encoder_combined.pkl
+!models/autoencoder_threshold_combined.pkl
 *.zip
 
 # Logs
