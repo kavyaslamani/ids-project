@@ -1,17 +1,26 @@
 __pycache__/
 *.pyc
-*.h5
 *.pkl
 *.zip
-attack_logs.csv
-ids.db
-data/
-models/
 
-# Local databases and backups
+# Logs
+attack_logs.csv
+
+# Protect local databases
+ids.db
 *.db
 *.sqlite
 *.sqlite3
 *.db-journal
 *.db-wal
 *.db-shm
+
+# Datasets
+data/
+
+# Ignore H5 files by default
+*.h5
+
+# Allow IDS model files for Render deployment
+!models/
+!models/*.h5
