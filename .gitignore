@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 *.pkl
 !models/scaler_combined.pkl
+!models/label_encoder_combined.pkl
 *.zip
 
 # Logs
